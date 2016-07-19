@@ -376,6 +376,141 @@
 		},
 
 		/**
+		 * Performs an AJAX-based update of the grid view contents.Just as update, but returns a Promise instead of a jQueryObject
+		 * @param options map the AJAX request options (see jQuery.ajax API manual). By default,
+		 * the URL to be requested is the one that generates the current content of the grid view.
+		 * @return object the jQuery object
+		 */
+		updatePromise: function (options) {
+			var customError;
+			var promise = $.Deferred();
+			if (options && options.error !== undefined) {
+				customError = options.error;
+				delete options.error;
+			}
+
+			this.each(function () {
+				var $form,
+					$grid = $(this),
+					id = $grid.attr('id'),
+					settings = gridSettings[id];
+
+				options = $.extend({
+					type: settings.ajaxType,
+					url: $grid.yiiGridView('getUrl'),
+					success: function (data) {
+						var $data = $('<div>' + data + '</div>');
+						$.each(settings.ajaxUpdate, function (i, el) {
+							var updateId = '#' + el;
+							$(updateId).replaceWith($(updateId, $data));
+						});
+						if (settings.afterAjaxUpdate !== undefined) {
+							settings.afterAjaxUpdate(id, data);
+						}
+						if (settings.selectableRows > 0) {
+							selectCheckedRows(id);
+						}
+						promise.resolve(data);
+					},
+					complete: function () {
+						yiiXHR[id] = null;
+						$grid.removeClass(settings.loadingClass);
+					},
+					error: function (XHR, textStatus, errorThrown) {
+						var ret, err;
+						if (XHR.readyState === 0 || XHR.status === 0) {
+							return;
+						}
+						if (customError !== undefined) {
+							ret = customError(XHR);
+							if (ret !== undefined && !ret) {
+								return;
+							}
+						}
+						switch (textStatus) {
+						case 'timeout':
+							err = 'The request timed out!';
+							break;
+						case 'parsererror':
+							err = 'Parser error!';
+							break;
+						case 'error':
+							if (XHR.status && !/^\s*$/.test(XHR.status)) {
+								err = 'Error ' + XHR.status;
+							} else {
+								err = 'Error';
+							}
+							if (XHR.responseText && !/^\s*$/.test(XHR.responseText)) {
+								err = err + ': ' + XHR.responseText;
+							}
+							break;
+						}
+
+						if (settings.ajaxUpdateError !== undefined) {
+							settings.ajaxUpdateError(XHR, textStatus, errorThrown, err, id);
+						} else if (err) {
+							alert(err);
+						}
+						promise.reject({XHR, textStatus, errorThrown});
+					}
+				}, options || {});
+				if (options.type === 'GET') {
+					if (options.data !== undefined) {
+						options.url = $.param.querystring(options.url, options.data);
+						options.data = {};
+					}
+				} else {
+					if (options.data === undefined) {
+						options.data = {};
+						$.each($(settings.filterSelector).serializeArray(), function () {
+							options.data[this.name] = this.value;
+						});
+					}
+				}
+				if (settings.csrfTokenName && settings.csrfToken) {
+					if (typeof options.data=='string')
+						options.data+='&'+settings.csrfTokenName+'='+settings.csrfToken;
+					else
+						options.data[settings.csrfTokenName] = settings.csrfToken;
+				}
+				if(yiiXHR[id] != null){
+					yiiXHR[id].abort();
+				}
+				//class must be added after yiiXHR.abort otherwise ajax.error will remove it
+				$grid.addClass(settings.loadingClass);
+				
+				if (settings.ajaxUpdate !== false) {
+					if(settings.ajaxVar) {
+						options.url = $.param.querystring(options.url, settings.ajaxVar + '=' + id);
+					}
+					if (settings.beforeAjaxUpdate !== undefined) {
+						settings.beforeAjaxUpdate(id, options);
+					}
+					yiiXHR[id] = $.ajax(options);
+				} else {  // non-ajax mode
+					if (options.type === 'GET') {
+						window.location.href = options.url;
+					} else {  // POST mode
+						$form = $('<form action="' + options.url + '" method="post"></form>').appendTo('body');
+						if (options.data === undefined) {
+							options.data = {};
+						}
+
+						if (options.data.returnUrl === undefined) {
+							options.data.returnUrl = window.location.href;
+						}
+
+						$.each(options.data, function (name, value) {
+							$form.append($('<input type="hidden" name="t" value="" />').attr('name', name).val(value));
+						});
+						$form.submit();
+					}
+				}
+			});
+			return promise.promise();
+		},
+		
+		/**
 		 * Returns the key values of the currently selected rows.
 		 * @return array the key values of the currently selected rows.
 		 */
